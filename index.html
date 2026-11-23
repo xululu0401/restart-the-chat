@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重开对话</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #eef0f2; color: #1f2328; line-height: 1.6; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 20px 14px 40px; }
+  h1 { font-size: 26px; letter-spacing: 1px; }
+  .lead { color: #4b525a; font-size: 14px; margin: 4px 0 14px; }
+  .card { background: #fff; border-radius: 8px; padding: 14px; border: 1px solid #d5dae0; margin-bottom: 14px; min-width: 0; }
+  .card h2 { font-size: 15px; color: #2d333a; font-weight: 600; margin-bottom: 8px; overflow-wrap: anywhere; }
+  .fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 10px; }
+  label { font-size: 12px; color: #555d66; display: block; overflow-wrap: anywhere; }
+  input { font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid #a9b1ba; border-radius: 5px; width: 100%; min-width: 0; background: #fff; font-variant-numeric: tabular-nums; }
+  .bad { border-color: #b4232c !important; background: #fff0f0 !important; }
+  button { font: inherit; font-size: 13px; padding: 6px 11px; border-radius: 5px; border: 1px solid #2b4a6b; background: #2b4a6b; color: #fff; cursor: pointer; }
+  button.ghost { background: #fff; color: #2b4a6b; }
+  .presets, .dl { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .err { display: none; background: #fff0f0; border: 1px solid #e3b0b3; color: #8a1c24; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; overflow-wrap: anywhere; }
+  .muted { color: #687079; font-size: 12px; }
+  #summary { font-size: 19px; font-weight: 700; overflow-wrap: anywhere; margin-bottom: 8px; }
+  #facts { margin: 8px 0 0 18px; font-size: 14px; } #facts li { margin: 3px 0; overflow-wrap: anywhere; }
+  /* 时间线 */
+  .tlwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #tl { display: block; }
+  .key { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 12px; color: #555d66; margin-top: 4px; }
+  .key i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+  /* 分段条 */
+  #segs { display: flex; gap: 3px; margin: 10px 0 2px; }
+  #segs div { min-width: 0; height: 30px; border-radius: 4px; color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* 对照 */
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.cmp { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; width: 100%; min-width: 560px; }
+  table.cmp th, table.cmp td { border-bottom: 1px solid #e4e8ec; padding: 6px 8px; text-align: right; white-space: nowrap; }
+  table.cmp th:first-child, table.cmp td:first-child { text-align: left; }
+  table.cmp th { background: #f3f5f7; font-weight: 600; }
+  table.cmp tr.now td { background: #e6eef7; font-weight: 700; }
+  table.cmp tr.gap td { border-top: 2px dashed #c6ccd3; }
+  table.cmp td.no { color: #a0362b; } table.cmp td.yes { color: #2f6b3c; }
+  table.cmp td .lg { display: inline-block; height: 8px; background: #8aa3bd; border-radius: 2px; vertical-align: middle; }
+  .hint375 { display: none; }
+  #sugs { display: grid; gap: 8px; }
+  .sug { display: flex; gap: 10px; align-items: center; justify-content: space-between; border: 1px solid #dde2e7; border-radius: 6px; padding: 8px 10px; }
+  .sug span { min-width: 0; overflow-wrap: anywhere; font-size: 14px; } .sug button { flex: none; }
+  .how { font-size: 13px; color: #2d333a; } .how p { margin: 6px 0; } .how b { color: #1f2328; }
+  @media (max-width: 720px) { .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hint375 { display: block; } }
+  @media (max-width: 480px) { .sug { flex-direction: column; align-items: stretch; } #summary { font-size: 16px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>重开对话</h1>
+  <p class="lead">跟 AI 聊一个长任务，每一轮都要把开头的资料和前面所有来回整段重发一遍，所以越聊越贵，聊到后面还会撑满上下文窗口。中途让它写份摘要、开个新对话接着聊，能省下一大截。填每轮大概多长、打算聊几轮、窗口和额度，这里算要不要重开、最少重开几次、在第几轮重开。单位都是 token，默认数字是虚构的。</p>
+
+  <div class="card">
+    <h2>这次要聊多长（单位 token）</h2>
+    <div class="fields">
+      <div><label for="s">固定开头（系统提示 + 贴进去的资料）</label><input id="s" inputmode="numeric" maxlength="9"></div>
+      <div><label for="u">你每轮说的</label><input id="u" inputmode="numeric" maxlength="7"></div>
+      <div><label for="a">它每轮回的</label><input id="a" inputmode="numeric" maxlength="7"></div>
+      <div><label for="N">打算聊几轮</label><input id="N" inputmode="numeric" maxlength="3"></div>
+      <div><label for="m">重开时摘要多长</label><input id="m" inputmode="numeric" maxlength="7"></div>
+      <div><label for="q">让它写摘要那句话</label><input id="q" inputmode="numeric" maxlength="6"></div>
+      <div><label for="W">上下文窗口</label><input id="W" inputmode="numeric" maxlength="9"></div>
+      <div><label for="B">这件事的额度（空 = 不限）</label><input id="B" inputmode="numeric" maxlength="16"></div>
+    </div>
+    <div class="presets" id="presets"></div>
+  </div>
+
+  <div class="err" id="error"></div>
+
+  <div id="out">
+    <div class="card">
+      <div id="summary"></div>
+      <div id="segs"></div>
+      <ul id="facts"></ul>
+    </div>
+    <div class="card">
+      <h2>每一轮发出去多少（柱高 = 这一轮要处理的 token）</h2>
+      <div class="tlwrap"><canvas id="tl" height="260"></canvas></div>
+      <div class="key"><span><i style="background:#c9ced4"></i>一口气不重开</span><span><i style="background:#2b6cb0"></i>按建议重开</span><span><i style="background:#e0a33a"></i>写摘要那一次</span><span><i style="background:#c0392b;height:2px;vertical-align:3px"></i>窗口上限</span></div>
+      <p class="muted" id="tlNote" style="margin-top:6px"></p>
+    </div>
+    <div class="card" id="cmpCard">
+      <h2>重开几次对照（点一行看那种分法）</h2>
+      <p class="muted hint375">表格较宽，可左右滑动。</p>
+      <div class="scroll"><table class="cmp" id="cmp"></table></div>
+      <p class="muted" id="cmpNote" style="margin-top:6px"></p>
+    </div>
+    <div class="card" id="sugCard">
+      <h2>改一下（点一下代回重算）</h2>
+      <div id="sugs"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>带走结果</h2>
+    <div class="dl">
+      <button id="dlCSV">CSV 表格</button><button id="dlMD">Markdown 报告</button><button id="dlPNG">结果卡 PNG</button><button id="dlJSON" class="ghost">JSON 备份</button>
+      <button id="reset" class="ghost">恢复默认</button>
+    </div>
+    <p class="muted" style="margin-top:6px">输入自动保存在这台设备的浏览器里，刷新还在。</p>
+  </div>
+
+  <div class="card how">
+    <h2>怎么算的</h2>
+    <p><b>每轮用多少</b>：第 j 轮要发「固定开头 s + 前面 j − 1 轮的来回 + 这轮你说的 u」，再生成它回的 a，合计 s + j × (u + a)。所以第 80 轮比第 1 轮贵得多，一口气聊 N 轮的总量 = N × s + (u + a) × N(N + 1) / 2。</p>
+    <p><b>重开</b>：在某一轮聊完后，发一句「把前面写成摘要」（q），它回一份摘要（m），这一次也要算进去；然后开新对话，开头是「固定开头 + 摘要」，接着聊。</p>
+    <p><b>窗口</b>：每一轮、以及写摘要那一次，装进去的总量都不能超过窗口。<b>额度</b>：所有轮次加上写摘要的次数，合计不能超过额度。</p>
+    <p><b>最少重开几次</b>：按「重开 0 次、1 次、2 次……」逐层做动态规划，每层求出在哪几轮重开总量最小，找到第一个装得下、又在额度内的层。重开越多越省 token，但每次摘要都会丢细节，所以先给够用的最少次数，再把最省的那种列在对照表里。</p>
+    <p class="muted">没算：缓存命中的折扣、每轮长短不一、回复越聊越长、摘要丢掉了多少信息。token 数和额度要你自己填（可以看你用的那家显示的用量），这里不提供任何平台的额度、价格或规则。</p>
+  </div>
+</div>
+
+  <script>
+/* 重开对话 · 计算核心
+ * 和 AI 聊一个长任务：每一轮都要把「固定开头 + 之前所有来回」整段重新发过去，再生成这一轮的回复。
+ * 记号（单位都是 token）：
+ *   s 固定开头（系统提示、贴进去的资料），u 你每轮说的，a 它每轮回的，d = u + a 每轮新增；
+ *   N 打算聊几轮，W 上下文窗口，B 这件事留的额度（空 = 不限）；
+ *   重开：先让它写一份摘要（提问 q、摘要 m），再开新对话，新对话从「固定开头 + 摘要」接着聊。
+ * 一段对话里第 j 轮（这段开头带 c0：第一段 0，之后 m）用掉：发送 s + c0 + (j−1)d + u，生成 a，合计 s + c0 + j·d。
+ * 一段 L 轮合计 L(s + c0) + d·L(L+1)/2；段尾若要重开，再加摘要那一次：(s + c0 + L·d + q) + m。
+ * 窗口：每一轮 s + c0 + j·d ≤ W；写摘要那一次 s + c0 + L·d + q + m ≤ W。
+ * 求：最少重开几次，能不撞窗口、不超额度聊完 N 轮；每次在第几轮重开（按重开次数分层的动态规划，精确最优）。
+ * 不算：缓存折扣、每轮长短不一、摘要丢了多少细节、回复变长变短。 */
+(function (root) {
+  'use strict';
+  function Bad(message, field) { const e = new Error(message); e.field = field; return e; }
+
+  /* [名称, 下限, 上限, 可空] */
+  const NUM = {
+    s: ['固定开头', 0, 1000000, false],
+    u: ['你每轮说的', 1, 100000, false],
+    a: ['它每轮回的', 1, 100000, false],
+    N: ['打算聊几轮', 1, 200, false],
+    m: ['摘要多长', 1, 100000, false],
+    q: ['让它写摘要那句话', 0, 10000, false],
+    W: ['上下文窗口', 1000, 2000000, false],
+    B: ['这件事的额度', 1000, 1e12, true],
+  };
+  const KEYS = ['s', 'u', 'a', 'N', 'm', 'q', 'W', 'B'];
+  const NMAX = 200;
+
+  const g3 = (x) => Math.round(x).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  function num(v, k) {
+    const [label, lo, hi, empty] = NUM[k];
+    const s = String(v == null ? '' : v).replace(/[,，\s]/g, '');
+    if (s === '') { if (empty) return null; throw Bad(label + '没填', k); }
+    if (!/^\d+$/.test(s)) throw Bad(label + '要填不带负号的整数 token 数（现在是「' + String(v).slice(0, 12) + '」）', k);
+    const x = +s;
+    if (x < lo || x > hi) throw Bad(label + '要在 ' + g3(lo) + ' 到 ' + g3(hi) + ' 之间', k);
+    return x;
+  }
+  function parse(inp) {
+    const P = {};
+    for (const k of KEYS) P[k] = num(inp[k], k);
+    P.d = P.u + P.a;
+    if (P.s + P.d > P.W) throw Bad('第 1 轮就装不下：固定开头 + 一来一回 = ' + g3(P.s + P.d) + '，超过窗口 ' + g3(P.W), 'W');
+    return P;
+  }
+
+  /* 一段 L 轮的用量；c0 = 这段开头带的摘要，last = 段尾不再重开 */
+  function segCost(P, L, c0, last) {
+    let c = L * (P.s + c0) + P.d * L * (L + 1) / 2;
+    if (!last) c += P.s + c0 + L * P.d + P.q + P.m;
+    return c;
+  }
+  function segFits(P, L, c0, last) {
+    const peak = P.s + c0 + L * P.d;
+    return peak <= P.W && (last || peak + P.q + P.m <= P.W);
+  }
+  /* 一段最多能聊几轮（不撞窗口） */
+  function segMax(P, c0, last) { return Math.floor((P.W - P.s - c0 - (last ? 0 : P.q + P.m)) / P.d); }
+
+  /* 动态规划：A[k][n] = 前 n 轮分成 k 段、每段后都已写完摘要的最少用量；T[k] = 重开 k 次聊完 N 轮的最少用量 */
+  function solve(P, kTop) {
+    const N = P.N, INF = Infinity;
+    const top = Math.min(kTop == null ? N - 1 : kTop, N - 1);
+    let A = new Array(N + 1).fill(INF); A[0] = 0;
+    const back = [];        /* back[k][n] = 上一段结束在第几轮 */
+    const T = [], Tlast = [];
+    for (let k = 0; k <= top; k++) {
+      const c0 = k === 0 ? 0 : P.m;
+      /* 收尾：最后一段 */
+      let best = INF, bi = -1;
+      const lmL = segMax(P, c0, true);
+      for (let i = Math.max(k === 0 ? 0 : k, N - lmL); i < N; i++) {
+        if (A[i] === INF) continue;
+        if (k === 0 && i !== 0) continue;
+        const v = A[i] + segCost(P, N - i, c0, true);
+        if (v < best) { best = v; bi = i; }
+      }
+      T.push(best); Tlast.push(bi);
+      if (k === top) break;
+      /* 往下一层：再切一段并写摘要 */
+      const B2 = new Array(N + 1).fill(INF), bk = new Array(N + 1).fill(-1);
+      const lm = segMax(P, c0, false);
+      for (let n = 1; n < N; n++) {
+        for (let i = Math.max(0, n - lm); i < n; i++) {
+          if (A[i] === INF) continue;
+          if (k === 0 && i !== 0) continue;
+          const v = A[i] + segCost(P, n - i, c0, false);
+          if (v < B2[n]) { B2[n] = v; bk[n] = i; }
+        }
+      }
+      back.push(bk);
+      A = B2;
+    }
+    function plan(k) {
+      if (!(k < T.length) || T[k] === Infinity) return null;
+      const ends = [P.N];
+      let i = Tlast[k];
+      for (let j = k; j >= 1; j--) { ends.unshift(i); i = back[j - 1][i]; }
+      const segs = [];
+      let st = 0;
+      ends.forEach((e, idx) => { segs.push({ from: st + 1, to: e, len: e - st, c0: idx === 0 ? 0 : P.m, last: idx === ends.length - 1 }); st = e; });
+      return segs;
+    }
+    return { T, plan };
+  }
+
+  /* 按段落把每一轮的用量摊开 */
+  function expand(P, segs) {
+    const turns = [], rs = [];
+    let total = 0, peak = 0;
+    segs.forEach((g, gi) => {
+      for (let j = 1; j <= g.len; j++) {
+        const ctx = P.s + g.c0 + j * P.d;
+        total += ctx; peak = Math.max(peak, ctx);
+        turns.push({ t: g.from + j - 1, seg: gi, ctx, cum: total });
+      }
+      if (!g.last) {
+        const c = P.s + g.c0 + g.len * P.d + P.q + P.m;
+        total += c; peak = Math.max(peak, c);
+        rs.push({ after: g.to, cost: c, cum: total });
+      }
+    });
+    return { turns, restarts: rs, total, peak };
+  }
+
+  /* 不重开：第几轮撞窗口、额度在第几轮用完 */
+  function never(P) {
+    const total = P.N * P.s + P.d * P.N * (P.N + 1) / 2;
+    const over = Math.floor((P.W - P.s) / P.d) + 1;      /* 第 over 轮装不下 */
+    let budgetTurn = null;
+    if (P.B != null) { let c = 0; for (let j = 1; j <= P.N; j++) { c += P.s + j * P.d; if (c > P.B) { budgetTurn = j; break; } } }
+    return { total, overTurn: over <= P.N ? over : null, budgetTurn, peak: P.s + P.N * P.d };
+  }
+
+  const fitsB = (P, v) => v !== Infinity && (P.B == null || v <= P.B);
+
+  function calculate(inp) {
+    const P = parse(inp);
+    const S = solve(P);
+    const nv = never(P);
+    let kMin = null;
+    for (let k = 0; k < S.T.length; k++) if (fitsB(P, S.T[k])) { kMin = k; break; }
+    let kCheap = 0;
+    for (let k = 1; k < S.T.length; k++) if (S.T[k] < S.T[kCheap]) kCheap = k;
+    const kWin = S.T.findIndex((v) => v !== Infinity); /* 只看窗口最少重开几次 */
+    const best = kMin != null ? expand(P, S.plan(kMin)) : null;
+    const segs = kMin != null ? S.plan(kMin) : null;
+    /* 重开次数对照：从只看窗口能聊完那一层起，到最少重开次数 +3 */
+    const rows = [];
+    const k0 = kWin < 0 ? 0 : Math.min(kWin, kMin == null ? kWin : kMin);
+    const k1 = Math.min(S.T.length - 1, (kMin == null ? Math.max(kWin, 0) : kMin) + 3);
+    if (kWin >= 0) for (let k = k0; k <= k1; k++) {
+      if (S.T[k] === Infinity) continue;
+      const sg = S.plan(k), ex = expand(P, sg);
+      rows.push({ k, total: S.T[k], longest: Math.max.apply(null, sg.map((g) => g.len)), peak: ex.peak, okB: fitsB(P, S.T[k]), now: k === kMin, cheap: k === kCheap, segs: sg, ex });
+    }
+    if (kWin >= 0 && !rows.some((x) => x.k === kCheap)) {
+      const sg = S.plan(kCheap), ex = expand(P, sg);
+      rows.push({ k: kCheap, total: S.T[kCheap], longest: Math.max.apply(null, sg.map((g) => g.len)), peak: ex.peak, okB: fitsB(P, S.T[kCheap]), now: false, cheap: true, gap: rows.length > 0 && rows[rows.length - 1].k < kCheap - 1, segs: sg, ex });
+    }
+    const cheapest = kWin >= 0 ? S.T[kCheap] : Infinity;
+    const r = { P, T: S.T, never: nv, kMin, kWin, kCheap, cheapest, segs, best, rows };
+    r.summary = summary(r);
+    r.facts = facts(r);
+    return r;
+  }
+
+  function pctS(x) { return (x * 100).toFixed(x >= 0.1 ? 0 : 1) + '%'; }
+  function summary(r) {
+    const P = r.P, nv = r.never;
+    if (r.kWin < 0) return '聊不完：窗口 ' + g3(P.W) + ' 装不下，一口气聊到第 ' + nv.overTurn + ' 轮就满，怎么重开也凑不够 ' + P.N + ' 轮。';
+    if (r.kMin == null) return '额度不够：' + P.N + ' 轮怎么重开最少也要 ' + g3(r.cheapest) + ' token，超过额度 ' + g3(P.B) + '。';
+    if (r.kMin === 0) return '不用重开：' + P.N + ' 轮一口气聊完共 ' + g3(nv.total) + ' token，最长一轮 ' + g3(nv.peak) + '，装得进窗口' + (P.B != null ? '，也在额度内' : '') + '。';
+    const ends = r.segs.slice(0, -1).map((g) => g.to);
+    const at = ends.length > 6 ? ends.slice(0, 5).join('、') + '……' + ends[ends.length - 1] : ends.join('、');
+    return '至少重开 ' + r.kMin + ' 次：' + (r.kMin === 1 ? '第 ' + at + ' 轮聊完后重开，' : '在第 ' + at + ' 轮聊完后各重开一次，') + P.N + ' 轮共 ' + g3(r.best.total) + ' token' + (P.B != null ? '，在额度 ' + g3(P.B) + ' 以内' : '') + '。';
+  }
+  function facts(r) {
+    const P = r.P, nv = r.never, f = [];
+    if (r.kWin < 0) {
+      const a1 = segMax(P, 0, false), b1 = segMax(P, P.m, true), b2 = segMax(P, P.m, false);
+      f.push('重开后的新对话一开头就有 ' + g3(P.s + P.m) + '（固定开头 + 摘要）：第一段最多聊 ' + Math.max(0, a1) + ' 轮就得写摘要，之后每段最多 ' + Math.max(0, b1) + ' 轮' + (b2 < 1 ? '，而且之后的段已经腾不出地方再写一次摘要' : '') + '，加起来到不了 ' + P.N + ' 轮。');
+      f.push('能改的是：把摘要写短、把固定开头里的资料删一些，或者换窗口更大的模型。');
+      return f;
+    }
+    f.push('一口气不重开：' + P.N + ' 轮共 ' + g3(nv.total) + ' token' +
+      (nv.overTurn ? '，第 ' + nv.overTurn + ' 轮就装不进窗口 ' + g3(P.W) : '，最长一轮 ' + g3(nv.peak) + '，窗口装得下') +
+      (nv.budgetTurn ? '；额度在第 ' + nv.budgetTurn + ' 轮用完' : '') + '。');
+    let gr = '';
+    if (P.N >= 2) { const h = Math.floor(P.N / 2), th = h * P.s + P.d * h * (h + 1) / 2; gr = '这一组从 ' + h + ' 轮聊到 ' + P.N + ' 轮，轮数多一倍，总量是 ' + (nv.total / th).toFixed(1) + ' 倍。'; }
+    f.push('越往后越贵：第 1 轮连发带回 ' + g3(P.s + P.d) + '，第 ' + P.N + ' 轮 ' + g3(P.s + P.N * P.d) + '，因为每轮都把前面所有来回重发一遍。' + gr);
+    if (r.kMin != null && r.kMin > 0) {
+      const sv = 1 - r.best.total / nv.total;
+      f.push('按上面这样重开：每段最长 ' + Math.max.apply(null, r.segs.map((g) => g.len)) + ' 轮，单次最多装 ' + g3(r.best.peak) + '；比一口气聊完（假设装得下）少 ' + g3(nv.total - r.best.total) + '（' + pctS(sv) + '），其中写摘要 ' + r.kMin + ' 次共 ' + g3(r.best.restarts.reduce((x, y) => x + y.cost, 0)) + '。');
+    }
+    if (r.kMin != null && r.kCheap > r.kMin) {
+      f.push('只看 token，重开 ' + r.kCheap + ' 次最省（共 ' + g3(r.cheapest) + '）；但每重开一次，摘要就会丢掉一些细节，所以这里先给够用的最少次数。');
+    }
+    return f;
+  }
+
+  /* ── 建议：能代回输入的改动 ── */
+  function withP(inp, patch) { return Object.assign({}, inp, patch); }
+  function kMinOf(inp, cap) {
+    const P = parse(inp), S = solve(P, cap);
+    for (let k = 0; k < S.T.length; k++) if (fitsB(P, S.T[k])) return k;
+    return null;
+  }
+  /* 在 [lo, hi] 里找满足 good 的最大整数（good 单调：小的满足，大的不满足） */
+  function maxInt(lo, hi, good) {
+    if (!good(lo)) return null;
+    while (lo < hi) { const mid = Math.floor((lo + hi + 1) / 2); if (good(mid)) lo = mid; else hi = mid - 1; }
+    return lo;
+  }
+  function suggestions(inp, r) {
+    const P = r.P, out = [];
+    if (r.kWin < 0) {
+      const winOK = (x) => { try { const Q = parse(x); return solve(Q).T.some((v) => v !== Infinity); } catch (e) { return false; } };
+      const mm = maxInt(1, P.m - 1, (x) => winOK(withP(inp, { m: String(x) })));
+      if (mm != null) { const k2 = solve(parse(withP(inp, { m: String(mm) }))).T.findIndex((v) => v !== Infinity); out.push({ id: 'm', text: '摘要压到 ' + g3(mm) + ' token（现在 ' + g3(P.m) + '）：装得下，但要重开 ' + k2 + ' 次', apply: withP(inp, { m: String(mm) }) }); }
+      const ww = [P.W * 2, P.W * 4].find((x) => x <= 2000000 && winOK(withP(inp, { W: String(x) })));
+      if (ww) out.push({ id: 'W', text: '换窗口 ' + g3(ww) + ' 的模型：装得下', apply: withP(inp, { W: String(ww) }) });
+      return out;
+    }
+    if (r.kMin == null) {
+      out.push({ id: 'B', text: '额度放到 ' + g3(r.cheapest) + '：重开 ' + r.kCheap + ' 次刚好聊完', apply: withP(inp, { B: String(r.cheapest) }) });
+      const nn = maxInt(1, P.N - 1, (x) => kMinOf(withP(inp, { N: String(x) }), x - 1) != null);
+      if (nn != null) out.push({ id: 'N', text: '只聊 ' + nn + ' 轮：额度够用', apply: withP(inp, { N: String(nn) }) });
+      return out;
+    }
+    if (r.kMin === 0) return out;
+    const t = r.kMin - 1;
+    const goal = (x) => { try { const k = kMinOf(x, t); return k != null && k <= t; } catch (e) { return false; } };
+    /* 1. 少聊几轮 */
+    const nn = maxInt(1, P.N - 1, (x) => goal(withP(inp, { N: String(x) })));
+    if (nn != null) out.push({ id: 'N', text: '只聊 ' + nn + ' 轮（少 ' + (P.N - nn) + ' 轮）：' + (t === 0 ? '不用重开' : '重开 ' + t + ' 次就够'), apply: withP(inp, { N: String(nn) }) });
+    /* 2. 让它回得短一点 */
+    const aa = maxInt(1, P.a - 1, (x) => goal(withP(inp, { a: String(x) })));
+    if (aa != null) out.push({ id: 'a', text: '让它每轮回短一点，压到 ' + g3(aa) + ' token（现在 ' + g3(P.a) + '）：' + (t === 0 ? '不用重开' : '少重开 1 次'), apply: withP(inp, { a: String(aa) }) });
+    /* 3. 固定开头删一些资料 */
+    if (P.s > 0) {
+      const ss = maxInt(0, P.s - 1, (x) => goal(withP(inp, { s: String(x) })));
+      if (ss != null) out.push({ id: 's', text: '固定开头删到 ' + g3(ss) + ' token（现在 ' + g3(P.s) + '）：' + (t === 0 ? '不用重开' : '少重开 1 次'), apply: withP(inp, { s: String(ss) }) });
+    }
+    /* 4. 摘要写短（只在还有重开时有用） */
+    if (t > 0) {
+      const mm = maxInt(1, P.m - 1, (x) => goal(withP(inp, { m: String(x) })));
+      if (mm != null) out.push({ id: 'm', text: '摘要压到 ' + g3(mm) + ' token（现在 ' + g3(P.m) + '）：少重开 1 次', apply: withP(inp, { m: String(mm) }) });
+    }
+    return out;
+  }
+
+  /* ── 导出 ── */
+  function csvCell(v) { const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  function label(k) { return NUM[k][0] + '（token）'; }
+  function toCSV(r, stamp) {
+    const P = r.P, L = [['重开对话', '生成于 ' + stamp], ['结论', r.summary], []];
+    L.push(['输入', '值']); KEYS.forEach((k) => L.push([label(k), P[k] == null ? '不限' : P[k]]));
+    L.push([], ['重开几次', '合计 token', '每段最长几轮', '最长一轮', '在额度内']);
+    r.rows.forEach((x) => L.push([x.k, x.total, x.longest, x.peak, x.okB ? '是' : '否']));
+    if (r.best) {
+      L.push([], ['第几轮', '第几段', '这一轮用量', '累计']);
+      const ex = r.best; let ri = 0;
+      ex.turns.forEach((t) => { L.push([t.t, t.seg + 1, t.ctx, t.cum]); if (ri < ex.restarts.length && ex.restarts[ri].after === t.t) { L.push(['写摘要后重开', '', ex.restarts[ri].cost, ex.restarts[ri].cum]); ri++; } });
+    }
+    L.push([], ['序号', '说明']); r.facts.forEach((x, i) => L.push([i + 1, x]));
+    return L.map((row) => row.map(csvCell).join(',')).join('\n') + '\n';
+  }
+  function toMD(r, stamp, sg) {
+    const P = r.P, o = [];
+    o.push('# 重开对话', '', '生成时间：' + stamp + '　默认数字是虚构的示例', '', '**' + r.summary + '**', '');
+    r.facts.forEach((x) => o.push('- ' + x));
+    o.push('', '## 条件（单位 token）', '', '| 项 | 值 |', '|---|---|');
+    KEYS.forEach((k) => o.push('| ' + NUM[k][0] + ' | ' + (P[k] == null ? '不限' : g3(P[k])) + ' |'));
+    if (r.segs) {
+      o.push('', '## 怎么分段', '', '| 第几段 | 从第几轮 | 到第几轮 | 几轮 | 开头带摘要 |', '|---|---|---|---|---|');
+      r.segs.forEach((g, i) => o.push('| ' + (i + 1) + ' | ' + g.from + ' | ' + g.to + ' | ' + g.len + ' | ' + (g.c0 ? g3(g.c0) : '—') + ' |'));
+    }
+    if (r.rows.length) {
+      o.push('', '## 重开几次对照', '', '| 重开几次 | 合计 token | 每段最长 | 最长一轮 | 在额度内 |', '|---|---|---|---|---|');
+      r.rows.forEach((x) => o.push('| ' + x.k + (x.now ? '（最少够用）' : '') + ' | ' + g3(x.total) + ' | ' + x.longest + ' 轮 | ' + g3(x.peak) + ' | ' + (x.okB ? '是' : '否') + ' |'));
+    }
+    if (sg && sg.length) { o.push('', '## 改一下'); sg.forEach((s) => o.push('- ' + s.text)); }
+    o.push('', '## 前提', '', '- 每轮都把固定开头和之前所有来回重新发一遍；每轮长短按平均算。', '- 不算缓存折扣、摘要丢掉的细节、回复长短波动。', '- token 数要你自己填（可以看你用的那家显示的用量）；这里不提供任何平台的额度或价格。');
+    return o.join('\n') + '\n';
+  }
+
+  const DEFAULT = { s: '2000', u: '200', a: '800', N: '80', m: '1500', q: '60', W: '64000', B: '1500000' };
+  const PRESETS = [
+    ['默认：80 轮长任务', DEFAULT],
+    ['短聊 20 轮', Object.assign({}, DEFAULT, { N: '20' })],
+    ['贴了一大份资料', Object.assign({}, DEFAULT, { s: '20000', N: '40' })],
+    ['摘要太长装不下', Object.assign({}, DEFAULT, { s: '20000', m: '22000', B: '' })],
+    ['额度不限、只看窗口', Object.assign({}, DEFAULT, { B: '' })],
+    ['额度太紧', Object.assign({}, DEFAULT, { B: '600000' })],
+  ];
+
+  const api = { DEFAULT, PRESETS, NUM, KEYS, NMAX, parse, segCost, segFits, segMax, solve, expand, never, calculate, suggestions, kMinOf, g3, toCSV, toMD, label };
+  if (typeof module === 'object' && module.exports) module.exports = api; else root.AppCore = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+  </script>
+  <script>
+/* 重开对话 · 界面层 */
+(function () {
+  'use strict';
+  const C = window.AppCore;
+  const KEY = 'restart-the-chat:v1';
+  const NAME = '重开对话';
+  const copy = (o) => JSON.parse(JSON.stringify(o));
+  const DEFAULT = C.DEFAULT, PRESETS = C.PRESETS, KEYS = C.KEYS, g3 = C.g3;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const SEGC = ['#2b6cb0', '#4a8bc9', '#1f4f82', '#6aa3d8'];
+  let state = copy(DEFAULT);
+  let last = null;
+  let view = null; /* 对照表里点中的那一行（重开几次），null = 结论那一行 */
+
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* 隐私模式忽略 */ } }
+  function load() {
+    try {
+      const o = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+      const s = {};
+      for (const k of KEYS) { if (o[k] == null || typeof o[k] === 'object') return null; s[k] = String(o[k]).slice(0, 16); }
+      return s;
+    } catch (e) { return null; }
+  }
+  function fill() { KEYS.forEach((k) => { $(k).value = state[k]; }); }
+
+  /* 当前要画的那种分法 */
+  function shown(r) {
+    const k = view != null ? view : r.kMin;
+    const row = r.rows.find((x) => x.k === k);
+    return row || null;
+  }
+  function renderSegs(r, row) {
+    if (!row) { $('segs').innerHTML = ''; $('segs').style.display = 'none'; return; }
+    $('segs').style.display = '';
+    $('segs').innerHTML = row.segs.map((g, i) => '<div title="第 ' + g.from + '–' + g.to + ' 轮" style="flex:' + g.len + ' 1 0;background:' + SEGC[i % SEGC.length] + '">' + (row.segs.length <= 12 ? g.from + '–' + g.to + ' 轮' : '') + '</div>').join('');
+  }
+  /* 时间线：灰柱 = 一口气不重开，蓝柱 = 这种分法，橙 = 写摘要；红线 = 窗口 */
+  function tlData(r, row) {
+    const P = r.P, bars = [];
+    for (let j = 1; j <= P.N; j++) bars.push({ t: j, never: P.s + j * P.d, plan: null, sum: null, seg: 0 });
+    if (row) {
+      row.ex.turns.forEach((x) => { bars[x.t - 1].plan = x.ctx; bars[x.t - 1].seg = x.seg; });
+      row.ex.restarts.forEach((x) => { bars[x.after - 1].sum = x.cost; });
+    }
+    const top = Math.max(P.W, P.s + P.N * P.d) * 1.08;
+    return { bars, top };
+  }
+  function drawTL(g, x0, y0, w, h, r, row, font) {
+    const P = r.P, D = tlData(r, row), n = D.bars.length;
+    const step = w / n, bw = Math.max(1, step * 0.8);
+    const Y = (v) => y0 + h - v / D.top * h;
+    g.fillStyle = '#f6f7f9'; g.fillRect(x0, y0, w, h);
+    D.bars.forEach((b, i) => {
+      const x = x0 + i * step + (step - bw) / 2;
+      g.fillStyle = b.never > P.W ? '#e9b8b2' : '#d5d9de';
+      g.fillRect(x, Y(b.never), bw, y0 + h - Y(b.never));
+      if (b.plan != null) { g.fillStyle = SEGC[b.seg % SEGC.length]; g.fillRect(x, Y(b.plan), bw, y0 + h - Y(b.plan)); }
+      if (b.sum != null) { g.fillStyle = '#e0a33a'; g.fillRect(x + bw * 0.25, Y(b.sum), Math.max(1, bw * 0.5), Y(b.plan || 0) - Y(b.sum)); }
+    });
+    g.strokeStyle = '#c0392b'; g.lineWidth = 2; g.beginPath(); g.moveTo(x0, Y(P.W)); g.lineTo(x0 + w, Y(P.W)); g.stroke();
+    g.fillStyle = '#c0392b'; g.font = font; g.textAlign = 'left'; g.fillText('窗口 ' + g3(P.W), x0 + 4, Y(P.W) - 5);
+    g.fillStyle = '#687079'; g.textAlign = 'center';
+    const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(w / 44))));
+    for (let i = 0; i < n; i++) if ((i + 1) % every === 0 || i === 0) g.fillText(String(i + 1), x0 + i * step + step / 2, y0 + h + 15);
+    g.textAlign = 'left';
+  }
+  function renderTL(r, row) {
+    const cv = $('tl'), box = cv.parentElement;
+    const cw = Math.max(box.clientWidth, Math.min(2400, r.P.N * 9 + 20));
+    const dpr = window.devicePixelRatio || 1, H = 260;
+    cv.style.width = cw + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(cw * dpr); cv.height = Math.round(H * dpr);
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, cw, H);
+    drawTL(g, 4, 8, cw - 8, H - 34, r, row, '12px -apple-system,"PingFang SC",sans-serif');
+    const nv = r.never;
+    $('tlNote').textContent = (nv.overTurn ? '灰柱从第 ' + nv.overTurn + ' 轮起冒过红线（画成浅红），一口气聊就装不下了。' : '灰柱一直在红线以下，一口气聊装得下。') +
+      (row && row.k > 0 ? '蓝柱每到重开就掉回低位：新对话只带固定开头和摘要。' : '') + '横轴是第几轮。' + (cw > box.clientWidth + 1 ? '轮数多，图比框宽，可左右滑动看后面的轮次。' : '');
+  }
+  function renderCmp(r) {
+    if (!r.rows.length) { $('cmpCard').style.display = 'none'; $('cmp').innerHTML = ''; $('cmpNote').textContent = ''; return; }
+    $('cmpCard').style.display = '';
+    const vmax = Math.max.apply(null, r.rows.map((x) => x.total));
+    const sel = shown(r);
+    let h = '<tr><th>重开几次</th><th>合计 token</th><th></th><th>每段最长</th><th>单次最多装</th><th>在额度内</th></tr>';
+    r.rows.forEach((x) => {
+      const tag = x.now ? '（最少够用）' : x.cheap ? '（最省）' : '';
+      h += '<tr data-k="' + x.k + '" class="' + (sel && sel.k === x.k ? 'now' : '') + (x.gap ? ' gap' : '') + '"><td>' + x.k + ' 次' + tag + '</td><td>' + g3(x.total) + '</td><td style="width:24%"><span class="lg" style="width:' + (x.total / vmax * 100).toFixed(1) + '%"></span></td><td>' + x.longest + ' 轮</td><td>' + g3(x.peak) + '</td><td class="' + (x.okB ? 'yes">是' : 'no">否') + '</td></tr>';
+    });
+    $('cmp').innerHTML = h;
+    [].forEach.call(document.querySelectorAll('#cmp tr[data-k]'), (tr) => tr.addEventListener('click', () => { view = +tr.dataset.k; paint(); }));
+    $('cmpNote').textContent = r.P.B == null ? '额度不限，只看窗口。' : '「在额度内」按额度 ' + g3(r.P.B) + ' 判断。' + (r.rows.some((x) => x.gap) ? '虚线下面那行跳过了中间的次数。' : '');
+  }
+  function sugList(sg) {
+    const box = $('sugs'); box.innerHTML = '';
+    sg.forEach((x) => {
+      const d = document.createElement('div'); d.className = 'sug';
+      d.innerHTML = '<span>' + esc(x.text) + '</span>';
+      const bt = document.createElement('button'); bt.textContent = '照这样算'; bt.dataset.sug = x.id;
+      bt.addEventListener('click', () => { state = copy(x.apply); fill(); run(); });
+      d.appendChild(bt); box.appendChild(d);
+    });
+    $('sugCard').style.display = sg.length ? '' : 'none';
+  }
+  function paint() {
+    const r = last.r, row = shown(r);
+    renderSegs(r, row); renderTL(r, row); renderCmp(r);
+  }
+  function run() {
+    [].forEach.call(document.querySelectorAll('.bad'), (e) => e.classList.remove('bad'));
+    view = null;
+    try {
+      const r = C.calculate(state);
+      const sg = C.suggestions(state, r);
+      $('error').style.display = 'none'; $('out').style.display = '';
+      $('summary').textContent = r.summary;
+      $('summary').style.color = r.kMin != null ? '#1f4f82' : '#a0362b';
+      $('facts').innerHTML = r.facts.map((f) => '<li>' + esc(f) + '</li>').join('');
+      last = { r, sg };
+      paint(); sugList(sg);
+    } catch (e) {
+      last = null;
+      if (e.field) { const el = $(e.field); if (el) el.classList.add('bad'); }
+      $('error').textContent = '算不了：' + e.message; $('error').style.display = 'block';
+      $('out').style.display = 'none';
+    }
+    save();
+  }
+
+  /* ── 导出 ── */
+  function stamp() { const d = new Date(), z = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
+  function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+  function wrap(g, t, w) {
+    const NOHEAD = '，。、；：！？）」』%·～';
+    const out = []; let line = [];
+    const toks = String(t).match(/[+±<>−-]?[0-9][0-9,.%]*(\s?(轮|次|倍|%))?|[A-Za-z_][A-Za-z0-9_.\-/]*|[\s\S]/g) || [];
+    const width = (a) => g.measureText(a.join('')).width;
+    for (const tk of toks) {
+      if (line.length && width(line.concat([tk])) > w) {
+        let carry = [tk];
+        while (line.length > 1 && (NOHEAD.indexOf(carry[0][0]) >= 0 || '（「『'.indexOf(line[line.length - 1]) >= 0)) carry.unshift(line.pop());
+        out.push(line.join(''));
+        line = carry; if (/^\s+$/.test(line[0])) line.shift();
+      } else line.push(tk);
+    }
+    if (line.length) out.push(line.join('')); return out;
+  }
+  function drawPNG(Lx) {
+    const r = Lx.r, P = r.P, row = r.rows.find((x) => x.k === r.kMin) || null;
+    const Wd = 1080, H = 1350, X = 70, TW = 940;
+    const cv = document.createElement('canvas'); cv.width = Wd; cv.height = H;
+    const g = cv.getContext('2d'), FF = '"PingFang SC","Microsoft YaHei",sans-serif';
+    g.fillStyle = '#eef0f2'; g.fillRect(0, 0, Wd, H);
+    g.fillStyle = '#ffffff'; g.fillRect(36, 36, Wd - 72, H - 72);
+    g.fillStyle = '#4b525a'; g.font = '24px ' + FF;
+    const tl = wrap(g, NAME + ' · 聊 ' + P.N + ' 轮 · 每轮 ' + g3(P.u) + ' + ' + g3(P.a) + ' · 开头 ' + g3(P.s) + ' · 窗口 ' + g3(P.W) + (P.B != null ? ' · 额度 ' + g3(P.B) : ''), TW).slice(0, 2);
+    tl.forEach((l, i) => g.fillText(l, X, 96 + i * 32));
+    let y = 150 + (tl.length - 1) * 32;
+    g.fillStyle = r.kMin != null ? '#1f4f82' : '#a0362b'; g.font = 'bold 32px ' + FF;
+    wrap(g, r.summary, TW).slice(0, 4).forEach((l) => { g.fillText(l, X, y); y += 44; });
+    y += 6;
+    /* 分段条 */
+    if (row) {
+      let x = X; const gap = 4, tot = TW - gap * (row.segs.length - 1);
+      row.segs.forEach((s, i) => {
+        const w = tot * s.len / P.N;
+        g.fillStyle = SEGC[i % SEGC.length]; g.fillRect(x, y, w, 40);
+        if (row.segs.length <= 8) { g.fillStyle = '#fff'; g.font = 'bold 18px ' + FF; g.textAlign = 'center'; g.fillText(s.from + '–' + s.to + ' 轮', x + w / 2, y + 27); g.textAlign = 'left'; }
+        x += w + gap;
+      });
+      y += 82;
+    } else y += 18;
+    /* 时间线 */
+    g.font = '22px ' + FF; g.fillStyle = '#2d333a'; g.fillText('每一轮发出去多少（灰 = 一口气不重开，蓝 = 按建议重开，橙 = 写摘要）', X, y); y += 16;
+    const TH = r.rows.length ? 300 : 520;
+    drawTL(g, X, y, TW, TH, r, row, '16px ' + FF);
+    y += TH + 56;
+    /* 对照 */
+    if (r.rows.length) {
+      g.font = '22px ' + FF; g.fillStyle = '#2d333a'; g.fillText('重开几次对照', X, y); y += 34;
+      const cols = [[X, 'left', '重开几次'], [X + 420, 'right', '合计 token'], [X + 600, 'right', '每段最长'], [X + 800, 'right', '单次最多装'], [X + TW, 'right', '在额度内']];
+      g.font = '16px ' + FF; g.fillStyle = '#687079'; cols.forEach(([cx, al, t]) => { g.textAlign = al; g.fillText(t, cx, y); }); g.textAlign = 'left';
+      r.rows.slice(0, 6).forEach((x) => {
+        if (x.now) { g.fillStyle = '#e6eef7'; g.fillRect(X - 8, y + 8, TW + 16, 32); }
+        y += 32; g.font = (x.now ? 'bold ' : '') + '19px ' + FF;
+        const v = [x.k + ' 次' + (x.now ? '（最少够用）' : x.cheap ? '（最省）' : ''), g3(x.total), x.longest + ' 轮', g3(x.peak), x.okB ? '是' : '否'];
+        cols.forEach(([cx, al], i) => { g.textAlign = al; g.fillStyle = i === 4 ? (x.okB ? '#2f6b3c' : '#a0362b') : '#1f2328'; g.fillText(v[i], cx, y); }); g.textAlign = 'left';
+      });
+      y += 46;
+    }
+    g.font = '19px ' + FF; g.fillStyle = '#2d333a';
+    for (const f of r.facts.slice(0, 1).concat(Lx.sg.slice(0, 2).map((s) => '可以改：' + s.text), r.kWin < 0 && Lx.sg.length ? [] : r.facts.slice(1))) {
+      const ls = wrap(g, '· ' + f, TW);
+      if (y + (ls.length - 1) * 28 > H - 130) break;
+      ls.forEach((l) => { g.fillText(l, X, y); y += 28; });
+      y += 4;
+    }
+    g.fillStyle = '#687079'; g.font = '16px ' + FF;
+    wrap(g, '按每轮重发全部历史、每轮长短取平均来算；没算缓存折扣和摘要丢掉的细节。默认数字是虚构的，token 数要你自己填。', TW).forEach((l, i) => g.fillText(l, X, H - 92 + i * 24));
+    return Promise.resolve(cv);
+  }
+  function backup() {
+    const r = last.r;
+    return { app: NAME, version: 1, savedAt: stamp(), input: copy(state), result: { summary: r.summary, minRestarts: r.kMin, restartAfter: r.segs ? r.segs.slice(0, -1).map((g) => g.to) : null, total: r.best ? r.best.total : null, neverTotal: r.never.total, neverOverflowTurn: r.never.overTurn, cheapestRestarts: r.kWin >= 0 ? r.kCheap : null, cheapestTotal: r.kWin >= 0 ? r.cheapest : null, rows: r.rows.map((x) => ({ restarts: x.k, total: x.total, longest: x.longest, peak: x.peak, withinBudget: x.okB })) } };
+  }
+  function init() {
+    KEYS.forEach((k) => $(k).addEventListener('input', () => { state[k] = $(k).value; run(); }));
+    PRESETS.forEach((p) => {
+      const b = document.createElement('button'); b.className = 'ghost'; b.textContent = p[0];
+      b.addEventListener('click', () => { state = copy(p[1]); fill(); run(); });
+      $('presets').appendChild(b);
+    });
+    $('reset').addEventListener('click', () => { state = copy(DEFAULT); fill(); run(); });
+    $('dlCSV').addEventListener('click', () => { if (last) download(NAME + '.csv', new Blob(['\ufeff' + C.toCSV(last.r, stamp())], { type: 'text/csv;charset=utf-8' })); });
+    $('dlMD').addEventListener('click', () => { if (last) download(NAME + '.md', new Blob([C.toMD(last.r, stamp(), last.sg)], { type: 'text/markdown;charset=utf-8' })); });
+    $('dlJSON').addEventListener('click', () => { if (last) download(NAME + '-备份.json', new Blob([JSON.stringify(backup(), null, 2)], { type: 'application/json' })); });
+    $('dlPNG').addEventListener('click', () => { if (last) drawPNG(last).then((cv) => cv.toBlob((b) => download(NAME + '-1080x1350.png', b), 'image/png')); });
+    window.addEventListener('resize', () => { if (last) paint(); });
+    state = load() || copy(DEFAULT);
+    fill(); run();
+    window.__ex = { last: () => last, state: () => state, view: () => view, presets: PRESETS, DEFAULT, drawPNG };
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+
+  </script>
+</body>
+</html>
